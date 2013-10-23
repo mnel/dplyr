@@ -72,6 +72,7 @@ namespace internal {
         ~Mean(){}
         
         inline double process_chunk( const Index_0_based& indices ){
+            Rprintf( "%s process_chunk\n", DEMANGLE(Mean) ) ;
             return internal::mean<RTYPE,NA_RM>(data_ptr, indices) ;    
         }
         

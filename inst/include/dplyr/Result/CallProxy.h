@@ -33,20 +33,80 @@ namespace dplyr {
         SEXP object;
     } ;
     
-    class CallProxy {
-        public:
-            typedef boost::unordered_map<SEXP, Subset*> SubsetMap ;
-            
-            CallProxy( Rcpp::Language& call_, const Rcpp::DataFrame& data_) : 
-                call(call_), subset_map(), proxies()
-            {
-                init_subset_map(data_) ;
+    typedef boost::unordered_map<SEXP, Subset*> SubsetMap ;
+          
+    template <typename Index>
+    inline SEXP process_helper( Result* res, const Index& index, const DataFrame& ){
+        Rprintf( "process_helper<%s>\n", DEMANGLE(Index) ) ;
+        return res->process( index );    
+    }
+    template <>
+    inline SEXP process_helper<Everything>( Result* res, const Everything& index, const DataFrame& data){
+        return res->process( FullDataFrame(data) );    
+    }
+    
+    template <typename Index>
+    class HybridCall {
+    public:
+        HybridCall( const Language& call_, const SubsetMap& subsets_, const DataFrame& data_, const Index& index_) : 
+            call( Rf_duplicate(call_) ), subsets(subsets_), data(data_), index(index_)
+        {
+            while( simplify(call) ) ;
+        } 
+        
+        inline operator SEXP(){ return call ;}
+        
+    private:
+        
+        bool simplify(SEXP obj){
+            if( Rf_isNull(call) ) return false ;
+            SEXP head = CAR(obj) ;
                 
-                // fill proxies
-                traverse_call(call);  
+            if( TYPEOF(head) == LANGSXP ){
+                bool known = known_pattern(head) ; 
+                if( known ){
+                    // TODO: make get_result take advantage of the subset map
+                    //       we should only have to calculate the subset for one variable once. 
+                    Result* res = get_result( head, data ) ;
+                    SETCAR(obj, process_helper<Index>(res, index, data) ) ; 
+                    delete res ;
+                    
+                    return true ;
+                } 
             }
             
-            CallProxy( const Rcpp::DataFrame& data_) : subset_map(), proxies(){
+            return simplify( CDR(obj) ) ;
+        }
+        
+        bool known_pattern(SEXP head){
+            return is_mean(head) ;    
+        }
+        
+        bool is_mean(SEXP head){
+            return CAR(head) == Rf_install( "mean" ) && Rf_length(head) == 2 && TYPEOF(CADR(head)) == SYMSXP ;    
+        }
+            
+        Language call ;
+        const SubsetMap& subsets;
+        const DataFrame& data ;
+        const Index& index ;
+        
+    } ;
+    
+    class CallProxy {
+        public:
+            
+            CallProxy( Rcpp::Language& call_, const Rcpp::DataFrame& data_) : 
+                call(call_), subset_map(), proxies(), hybrid(false), data(data_)
+            {
+                hybrid = can_simplify(call) ;
+                init_subset_map(data_) ;
+                
+                traverse_call(call);  
+                
+            }
+            
+            CallProxy( const Rcpp::DataFrame& data_) : subset_map(), proxies(), hybrid(false), data(data_) {
                 init_subset_map(data_) ;
             }
             
@@ -57,6 +117,9 @@ namespace dplyr {
             template <typename Container>
             SEXP get(const Container& indices){
                 Rcpp::Shelter<SEXP> __ ;
+                
+                if( hybrid ) set_call( HybridCall<Container>( call, subset_map, data, indices) ); 
+                
                 int n = proxies.size() ;
                 boost::unordered_map<SEXP,SEXP> chunks ;
                 for( int i=0; i<n; i++){
@@ -111,7 +174,25 @@ namespace dplyr {
             inline SEXP as_symbol(SEXP x) const {
                 return Rf_install( CHAR(x) );
             }
-           
+            
+            // recurse and find out if we can simplify the call 
+            bool can_simplify( SEXP call ){
+                if( Rf_isNull(call) ) return false ;
+                
+                SEXP head = CAR(call) ;
+                if( TYPEOF(head) == LANGSXP ) {
+                    // TODO: generalize and share the test with HybridCall
+                    if( is_mean(head) ) return true ;
+                    
+                    return can_simplify( CDR(call) ) ;
+                }
+                return can_simplify(CDR(call)) ;
+            }
+            
+            bool is_mean(SEXP head){
+                return CAR(head) == Rf_install( "mean" ) && Rf_length(head) == 2 && TYPEOF(CADR(head)) == SYMSXP ;    
+            }
+            
             void traverse_call( SEXP obj ){
                  if( ! Rf_isNull(obj) ){ 
                      SEXP head = CAR(obj) ;
@@ -133,6 +214,8 @@ namespace dplyr {
            Rcpp::Language call ;
            SubsetMap subset_map ;
            std::vector<CallElementProxy> proxies ;
+           bool hybrid ;
+           const Rcpp::DataFrame& data ;
     } ;
 
 }

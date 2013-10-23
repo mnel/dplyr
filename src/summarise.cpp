@@ -74,6 +74,7 @@ Result* get_result( SEXP call, const DataFrame& df){
         SEXP fun_symbol = CAR(call) ;
         SEXP arg1 = CADR(call) ;
         ResultPrototype reducer = get_1_arg( fun_symbol ) ;
+        
         if( reducer ){
             Result* res = reducer( arg1, df ) ;
             if( res ) return res ;    

@@ -36,7 +36,7 @@ namespace dplyr {
     class DataFrameJoinVisitors ;
     template <typename OUT, int INPUT_RTYPE> class Reducer ; 
 }
-
+dplyr::Result* get_result( SEXP call, const DataFrame&) ;
 DataFrame build_index_cpp( DataFrame data ) ;
 
 #include <dplyr/visitor_set/visitor_set.h>
